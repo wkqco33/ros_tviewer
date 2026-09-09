@@ -203,3 +203,37 @@ def test_topics_on_empty_ros_still_succeeds(monkeypatch):
     monkeypatch.setattr(node_mod, "list_camera_topics", lambda timeout=5.0: [])
     root = build_root()
     assert root.execute(["topics"]) == 0
+
+
+def test_cli_works_without_config_and_env(monkeypatch, tmp_path):
+    """config.toml/.env 없는 환경(클론 직후/PyPI 설치)에서 CLI가 실패하지 않아야 한다."""
+    monkeypatch.chdir(tmp_path)  # 두 파일 모두 없는 디렉터리
+    root = build_root()
+    settings = root._config_settings
+    assert settings is not None
+    assert settings.files == ()
+    assert settings.dotenv is None
+    assert root.execute(["config"]) == 0
+
+
+def test_default_config_files_loaded_when_present(tmp_path, monkeypatch):
+    """파일이 있으면 기존처럼 로드되고, 설정이 플래그 기본값을 이긴다."""
+    import ros_tviewer.node as node_mod
+    import ros_tviewer.ros_env as ros_env_mod
+
+    (tmp_path / "config.toml").write_text('[camera]\ntopic = "/cfg/topic"\n')
+    (tmp_path / ".env").write_text("ROS_TVIEWER_CAMERA__FPS=7\n")
+    monkeypatch.chdir(tmp_path)
+
+    calls = {}
+    monkeypatch.setattr(ros_env_mod, "ensure_rclpy", lambda: None)
+    monkeypatch.setattr(node_mod, "run_viewer", lambda **kwargs: calls.update(kwargs) or 0)
+
+    root = build_root()
+    settings = root._config_settings
+    assert settings is not None
+    assert settings.files == ("config.toml",)
+    assert settings.dotenv == ".env"
+    assert root.execute(["play"]) == 0
+    assert calls["topic"] == "/cfg/topic"
+    assert calls["fps"] == 7

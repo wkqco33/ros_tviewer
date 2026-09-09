@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import pathlib
 
 from wpycli import Command, ConfigSettings, LoggingSettings
 
@@ -10,6 +11,12 @@ DEFAULT_TOPIC = "/camera/image_raw"
 
 
 def build_root() -> Command:
+    # 기본 설정 파일(config.toml/.env)은 존재할 때만 로드한다 — wconfig는 누락 파일을
+    # 오류로 처리하므로, 없는 환경(PyPI 설치/클론 직후)에서 CLI 전체가 실패한다.
+    # 명시적 --config/--dotenv 플래그는 그대로 전달하며, 누락 시 오류가 맞다.
+    config_files = ("config.toml",) if pathlib.Path("config.toml").is_file() else ()
+    dotenv = ".env" if pathlib.Path(".env").is_file() else None
+
     root = Command(
         use="ros-tviewer",
         short="ROS 2 카메라 토픽을 터미널에서 재생하는 뷰어",
@@ -39,8 +46,8 @@ def build_root() -> Command:
                     "frames": 0,
                 },
             },
-            files=("config.toml",),
-            dotenv=".env",
+            files=config_files,
+            dotenv=dotenv,
             env_prefix="ROS_TVIEWER",
             file_flag="config",
             dotenv_flag="dotenv",
