@@ -1,0 +1,16 @@
+[app]
+name = "ros-tviewer"
+default_target = "world"
+grpc_enabled = false
+
+[logging]
+level = "WARNING"
+
+[camera]
+topic = "/camera/image_raw"
+fps = 30
+rotate = 0
+stretch = false
+compressed = false
+timeout = 5.0
+frames = 0
