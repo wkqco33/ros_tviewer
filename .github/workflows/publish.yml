@@ -3,6 +3,7 @@ name: publish
 on:
   release:
     types: [published]
+  workflow_dispatch: # 수동 재배포 (릴리스 재실행은 원본 워크플로우 SHA를 재사용함)
 
 jobs:
   publish:
