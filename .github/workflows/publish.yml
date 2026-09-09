@@ -32,4 +32,6 @@ jobs:
           UV_NO_CACHE: "1" # 캐시 독립 빌드 (cache poisoning 공격 표면 제거)
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc # v1.12.4
+        # v1.14.2 — 이전 버전(v1.12.x)의 twine은 hatchling이 생성하는
+        # Metadata-Version 2.5를 거부하므로 신규 버전 유지 필수
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
