@@ -18,6 +18,12 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@8d55fbecc275b1c35dbe060458839f8d30439ccf # v3
 
+      - name: Install system dependencies
+        # tcamviewer sdist 빌드에 cmake + FFmpeg dev 라이브러리 필요
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
+
       - name: Install dependencies
         run: |
           if [ -f uv.lock ]; then
