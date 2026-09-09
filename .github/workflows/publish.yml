@@ -20,6 +20,9 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@8d55fbecc275b1c35dbe060458839f8d30439ccf # v3
+        with:
+          # 퍼블리시 워크플로우는 캐시 재사용 금지 — 캐시 포이즈닝 공격 표면 제거 (zizmor)
+          enable-cache: false
 
       - name: Install system dependencies
         # tcamviewer sdist 빌드에 cmake + FFmpeg dev 라이브러리 필요
