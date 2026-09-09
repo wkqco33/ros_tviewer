@@ -49,6 +49,7 @@ ROS 2 카메라 토픽을 터미널에서 재생하는 CLI 뷰어. 이 문서는
 | 모듈 | 책임 | 금지 사항 |
 | --- | --- | --- |
 | `main.py` | wpycli 커맨드 정의, ctx → 파라미터 변환 | ROS/rclpy 직접 임포트 금지, 렌더 로직 금지 |
+| `config_io.py` | config.toml 읽기/쓰기·TOML 리터럴 파싱 헬퍼 | 순수 함수 유지, rclpy 임포트 금지 |
 | `ros_env.py` | rclpy 가용성 확인, sys.path 주입, 환경변수 구성 후 `os.execve` 재실행 | rclpy를 모듈 레벨에서 import 금지(항상 함수 내 지연 임포트) |
 | `node.py` | rclpy 노드/구독/스핀 루프, 프레임 슬롯·레이트리미터 | 픽셀 변환 로직 금지(convert에 위임), 렌더러 생성만 |
 | `convert.py` | 메시지 → RGB24 numpy. 순수 함수. rclpy 무의존 (테스트 가능) | rclpy/노드 상태 금지. cv2 임포트는 함수 내부 지연. 채널 재배치는 cv2.cvtColor 사용 |
@@ -103,7 +104,20 @@ uv run ros-tviewer play /camera/image_raw   # 실행
 
 ## 5. 설정 참조 (wpyconf)
 
-`config.toml` / `.env` / CLI 플래그 우선순위: **CLI > env > file > defaults**.
+로딩 후보와 우선순위(나중에 로드된 파일이 이긴다):
+
+1. **defaults** (`main.py` `_CONFIG_DEFAULTS`)
+2. 플랫폼 사용자 경로 `config.toml` — `wconfig.user_config_dir(APP_NAME)`
+   (Linux: `$XDG_CONFIG_HOME/ros-tviewer/`, macOS: `~/Library/Application Support/ros-tviewer/`,
+   Windows: `%APPDATA%/ros-tviewer/`) — uvx 등 임의 cwd에서도 유지되는 영구 설정
+3. cwd `config.toml` — 프로젝트 로컬 오버라이드
+4. `.env` (cwd) — `ROS_TVIEWER_` 프리픽스
+5. 환경변수 — `ROS_TVIEWER_CAMERA__TOPIC` 형식
+6. CLI 플래그 / `--config/-c` 플래그로 지정한 파일 (최우선)
+
+`config` 서브커맨드: `show`(병합 결과 JSON), `path`(후보/로드 경로),
+`init`(사용자 경로 생성, `--force`), `set <key> <value>`(저장 대상:
+`--config` 플래그 경로 또는 사용자 경로). TOML 쓰기는 `config_io.py`가 담당한다.
 
 | 키 (config) | env | CLI 플래그 | 기본값 |
 | --- | --- | --- | --- |

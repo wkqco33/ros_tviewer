@@ -1,8 +1,4 @@
-[app]
-name = "ros-tviewer"
-default_target = "world"
-grpc_enabled = false
-
+# 실제로 읽히는 키만 유지한다. 우선순위: CLI 플래그 > .env > 이 파일 > 기본값.
 [logging]
 level = "WARNING"
 

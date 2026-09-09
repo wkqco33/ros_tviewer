@@ -4,11 +4,21 @@ from __future__ import annotations
 
 import pathlib
 
+from ros_tviewer.config_io import read_toml
 from ros_tviewer.main import build_root
 
 
 def _subcommands(root):
     return {c.name: c for c in root.commands}
+
+
+def _isolate_user_config(monkeypatch, tmp_path: pathlib.Path) -> pathlib.Path:
+    """user_config_dir를 tmp로 격리해 개발 머신의 실제 설정을 읽지 않게 한다."""
+    import ros_tviewer.main as main_mod
+
+    user_dir = tmp_path / "usercfg"
+    monkeypatch.setattr(main_mod, "user_config_dir", lambda name: user_dir / name)
+    return user_dir
 
 
 def test_build_root_has_viewer_commands():
@@ -40,6 +50,15 @@ def test_config_defaults_include_camera_keys():
     assert defaults["camera"]["topic"] == "/camera/image_raw"
     assert defaults["camera"]["fps"] == 30
     assert defaults["camera"]["timeout"] == 5.0
+    assert "app" not in defaults  # 어디서도 읽지 않는 app.* 키는 제거했다
+
+
+def test_config_has_management_subcommands():
+    root = build_root()
+    config_cmd = root.find_subcommand("config")
+    assert config_cmd is not None
+    names = {child.name for child in config_cmd.commands}
+    assert {"show", "path", "init", "set"} <= names
 
 
 def test_play_invokes_run_viewer_with_parsed_flags(monkeypatch):
@@ -208,6 +227,7 @@ def test_topics_on_empty_ros_still_succeeds(monkeypatch):
 def test_cli_works_without_config_and_env(monkeypatch, tmp_path):
     """config.toml/.env 없는 환경(클론 직후/PyPI 설치)에서 CLI가 실패하지 않아야 한다."""
     monkeypatch.chdir(tmp_path)  # 두 파일 모두 없는 디렉터리
+    _isolate_user_config(monkeypatch, tmp_path)  # 사용자 경로도 비어 있게 격리
     root = build_root()
     settings = root._config_settings
     assert settings is not None
@@ -221,6 +241,7 @@ def test_default_config_files_loaded_when_present(tmp_path, monkeypatch):
     import ros_tviewer.node as node_mod
     import ros_tviewer.ros_env as ros_env_mod
 
+    _isolate_user_config(monkeypatch, tmp_path)  # cwd config.toml만 후보가 되도록
     (tmp_path / "config.toml").write_text('[camera]\ntopic = "/cfg/topic"\n')
     (tmp_path / ".env").write_text("ROS_TVIEWER_CAMERA__FPS=7\n")
     monkeypatch.chdir(tmp_path)
@@ -237,3 +258,104 @@ def test_default_config_files_loaded_when_present(tmp_path, monkeypatch):
     assert root.execute(["play"]) == 0
     assert calls["topic"] == "/cfg/topic"
     assert calls["fps"] == 7
+
+
+def test_user_platform_config_loaded(tmp_path, monkeypatch):
+    """플랫폼 사용자 경로의 config.toml을 로드한다 (uvx 등 임의 cwd 환경)."""
+    import ros_tviewer.node as node_mod
+    import ros_tviewer.ros_env as ros_env_mod
+
+    user_dir = _isolate_user_config(monkeypatch, tmp_path)
+    user_file = user_dir / "ros-tviewer" / "config.toml"
+    user_file.parent.mkdir(parents=True)
+    user_file.write_text('[camera]\ntopic = "/user/topic"\n')
+    monkeypatch.chdir(tmp_path)  # cwd에는 config.toml 없음
+
+    calls = {}
+    monkeypatch.setattr(ros_env_mod, "ensure_rclpy", lambda: None)
+    monkeypatch.setattr(node_mod, "run_viewer", lambda **kwargs: calls.update(kwargs) or 0)
+
+    root = build_root()
+    settings = root._config_settings
+    assert settings is not None
+    assert settings.files == (str(user_file),)
+    assert root.execute(["play"]) == 0
+    assert calls["topic"] == "/user/topic"
+
+
+def test_cwd_config_overrides_user_config(tmp_path, monkeypatch):
+    """cwd의 config.toml이 사용자 설정을 이긴다(로컬 오버라이드). --config가 최우선."""
+    import ros_tviewer.node as node_mod
+    import ros_tviewer.ros_env as ros_env_mod
+
+    user_dir = _isolate_user_config(monkeypatch, tmp_path)
+    user_file = user_dir / "ros-tviewer" / "config.toml"
+    user_file.parent.mkdir(parents=True)
+    user_file.write_text('[camera]\ntopic = "/user/topic"\nfps = 11\n')
+    (tmp_path / "config.toml").write_text('[camera]\ntopic = "/cwd/topic"\n')
+    monkeypatch.chdir(tmp_path)
+
+    calls = {}
+    monkeypatch.setattr(ros_env_mod, "ensure_rclpy", lambda: None)
+    monkeypatch.setattr(node_mod, "run_viewer", lambda **kwargs: calls.update(kwargs) or 0)
+
+    root = build_root()
+    settings = root._config_settings
+    assert settings is not None
+    assert settings.files == (str(user_file), "config.toml")
+    assert root.execute(["play"]) == 0
+    assert calls["topic"] == "/cwd/topic"  # cwd가 user를 이긴다
+    assert calls["fps"] == 11  # cwd에 없는 키는 user에서 보충
+
+
+def test_config_init_creates_user_config(tmp_path, monkeypatch):
+    _isolate_user_config(monkeypatch, tmp_path)
+    monkeypatch.chdir(tmp_path)
+    root = build_root()
+    assert root.execute(["config", "init"]) == 0
+    target = tmp_path / "usercfg" / "ros-tviewer" / "config.toml"
+    assert target.is_file()
+    data = read_toml(target)
+    assert data["camera"]["topic"] == "/camera/image_raw"
+
+
+def test_config_init_refuses_existing_without_force(tmp_path, monkeypatch):
+    _isolate_user_config(monkeypatch, tmp_path)
+    monkeypatch.chdir(tmp_path)
+    root = build_root()
+    assert root.execute(["config", "init"]) == 0
+    assert root.execute(["config", "init"]) == 1  # 이미 존재
+    assert root.execute(["config", "init", "--force"]) == 0  # 덮어쓰기 허용
+
+
+def test_config_set_writes_typed_values(tmp_path, monkeypatch):
+    _isolate_user_config(monkeypatch, tmp_path)
+    monkeypatch.chdir(tmp_path)
+    root = build_root()
+    assert root.execute(["config", "init"]) == 0
+    assert root.execute(["config", "set", "camera.fps", "60"]) == 0
+    assert root.execute(["config", "set", "camera.topic", "/new/topic"]) == 0
+    assert root.execute(["config", "set", "camera.stretch", "true"]) == 0
+    data = read_toml(tmp_path / "usercfg" / "ros-tviewer" / "config.toml")
+    assert data["camera"]["fps"] == 60  # int로 해석
+    assert data["camera"]["topic"] == "/new/topic"  # 문자열로 해석
+    assert data["camera"]["stretch"] is True
+
+
+def test_config_set_requires_two_args(tmp_path, monkeypatch, capsys):
+    _isolate_user_config(monkeypatch, tmp_path)
+    monkeypatch.chdir(tmp_path)
+    root = build_root()
+    assert root.execute(["config", "set", "camera.fps"]) == 1
+    assert "사용법" in capsys.readouterr().out
+
+
+def test_config_show_and_path_run_clean(tmp_path, monkeypatch, capsys):
+    _isolate_user_config(monkeypatch, tmp_path)
+    monkeypatch.chdir(tmp_path)
+    root = build_root()
+    assert root.execute(["config", "show"]) == 0
+    assert "camera" in capsys.readouterr().out
+    assert root.execute(["config", "path"]) == 0
+    out = capsys.readouterr().out
+    assert "user" in out and "cwd" in out

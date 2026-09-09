@@ -3,18 +3,64 @@ from __future__ import annotations
 import json
 import pathlib
 
+from wconfig import user_config_dir
 from wpycli import Command, ConfigSettings, LoggingSettings
+
+from .config_io import parse_toml_value, read_toml, set_nested, write_toml
 
 APP_NAME = "ros-tviewer"
 VERSION = "0.1.0"
 DEFAULT_TOPIC = "/camera/image_raw"
 
+# 실제로 읽히는 키만 둔다. app.name/app.default_topic 등은 어디서도 읽지 않아 제거했다.
+_CONFIG_DEFAULTS: dict[str, dict[str, object]] = {
+    "logging": {"level": "WARNING", "file": None},
+    "camera": {
+        "topic": DEFAULT_TOPIC,
+        "fps": 30,
+        "rotate": 0,
+        "stretch": False,
+        "compressed": False,
+        "timeout": 5.0,
+        "frames": 0,
+    },
+}
+
+_CONFIG_HEADER = """\
+# ros-tviewer 사용자 설정
+# 우선순위: CLI 플래그 > 환경변수(ROS_TVIEWER_*) > 이 파일 > 기본값
+# 키 수정은 `ros-tviewer config set <key> <value>` 를 권장한다.
+"""
+
+
+def user_config_path() -> pathlib.Path:
+    """플랫폼별 사용자 설정 파일 경로 (존재 여부와 무관하게 반환)."""
+    return user_config_dir(APP_NAME) / "config.toml"
+
+
+def _discover_config_files() -> tuple[str, ...]:
+    """로드할 config.toml 후보. 나중 파일이 우선하므로 (user, cwd) 순서다.
+
+    - 사용자 경로: uvx 등 임의 cwd에서 실행해도 유지되는 영구 설정
+      (Linux: ~/.config, macOS: ~/Library/Application Support, Windows: %APPDATA%)
+    - cwd: 개발 트리/프로젝트 로컬 오버라이드
+    - --config 플래그: ConfigSettings가 마지막에 추가 (최우선)
+    """
+    files: list[str] = []
+    user = user_config_path()
+    if user.is_file():
+        files.append(str(user))
+    cwd_file = pathlib.Path("config.toml")
+    if cwd_file.is_file():
+        files.append(str(cwd_file))
+    return tuple(files)
+
 
 def build_root() -> Command:
-    # 기본 설정 파일(config.toml/.env)은 존재할 때만 로드한다 — wconfig는 누락 파일을
-    # 오류로 처리하므로, 없는 환경(PyPI 설치/클론 직후)에서 CLI 전체가 실패한다.
-    # 명시적 --config/--dotenv 플래그는 그대로 전달하며, 누락 시 오류가 맞다.
-    config_files = ("config.toml",) if pathlib.Path("config.toml").is_file() else ()
+    # 기본 설정 파일은 존재할 때만 로드한다 — wconfig는 누락 파일을 오류로 처리한다.
+    # 플랫폼 사용자 경로 + cwd config.toml을 순서대로 로드하고, 명시적 --config
+    # 플래그는 그대로 전달하며(최우선), 누락 시 오류가 맞다.
+    config_files = _discover_config_files()
     dotenv = ".env" if pathlib.Path(".env").is_file() else None
 
     root = Command(
@@ -30,22 +76,7 @@ def build_root() -> Command:
     root.add_persistent_string_flag("log-file", help="로그 파일 경로 override")
     root.configure_runtime(
         config=ConfigSettings(
-            defaults={
-                "app": {
-                    "name": APP_NAME,
-                    "default_topic": DEFAULT_TOPIC,
-                },
-                "logging": {"level": "WARNING", "file": None},
-                "camera": {
-                    "topic": DEFAULT_TOPIC,
-                    "fps": 30,
-                    "rotate": 0,
-                    "stretch": False,
-                    "compressed": False,
-                    "timeout": 5.0,
-                    "frames": 0,
-                },
-            },
+            defaults=_CONFIG_DEFAULTS,
             files=config_files,
             dotenv=dotenv,
             env_prefix="ROS_TVIEWER",
@@ -70,9 +101,34 @@ def build_root() -> Command:
     )
     topics = Command(use="topics", short="광고 중인 카메라 토픽을 나열한다.", run=run_topics)
     topics.add_float_flag("timeout", help="디스커버리 대기 시간(초)", shorthand="t")
-    config = Command(use="config", short="현재 설정을 출력한다.", run=run_config)
+    config_cmd = Command(
+        use="config",
+        short="설정을 조회·관리한다.",
+        long="서브커맨드 없이 실행하면 병합된 현재 설정을 JSON으로 출력한다(=show).",
+        run=run_config,
+    )
+    show = Command(use="show", short="병합된 현재 설정을 JSON으로 출력한다.", run=run_config_show)
+    path_cmd = Command(
+        use="path", short="설정 파일 후보 경로와 실제 로드된 파일을 표시한다.", run=run_config_path
+    )
+    init = Command(
+        use="init",
+        short="사용자 설정 파일을 생성한다.",
+        long="플랫폼별 사용자 경로(또는 --config 지정 경로)에 기본 설정을 쓴다.",
+        run=run_config_init,
+    )
+    init.add_bool_flag("force", help="이미 존재해도 덮어쓴다")
+    set_cmd = Command(
+        use="set <key> <value>",
+        short="설정 키 값을 사용자 설정 파일에 저장한다.",
+        long="값은 TOML 리터럴로 해석한다: 60 → int, 5.0 → float, true → bool,\n"
+        "따옴표 없는 토픽 경로 같은 텍스트는 문자열로 저장한다.\n"
+        "저장 위치는 --config 플래그 또는 플랫폼 사용자 경로다.",
+        run=run_config_set,
+    )
+    config_cmd.add_command(show, path_cmd, init, set_cmd)
     version = Command(use="version", short="앱·의존성·런타임 버전을 출력한다.", run=run_version)
-    root.add_command(play, topics, config, version)
+    root.add_command(play, topics, config_cmd, version)
     return root
 
 
@@ -156,9 +212,84 @@ def run_topics(ctx):
     return 0
 
 
-def run_config(ctx):
+def _render_config_json(ctx) -> int:
     rendered = json.dumps(ctx.config.as_dict(), indent=2, sort_keys=True)
     print(ctx.terminal.pretty_json(rendered))
+    return 0
+
+
+def run_config(ctx):
+    """(하위호환) 서브커맨드 없는 `config` = show."""
+    return _render_config_json(ctx)
+
+
+def run_config_show(ctx) -> int:
+    return _render_config_json(ctx)
+
+
+def run_config_path(ctx) -> int:
+    """설정 파일 후보 경로와 실제 로드된 파일을 표시한다."""
+    user = user_config_path()
+    cwd_file = pathlib.Path("config.toml")
+    for label, path in (("user", user), ("cwd", cwd_file)):
+        state = "ok" if path.is_file() else "없음"
+        print(f"{label:<4} {path} ({state})")
+    loaded = [
+        source.origin for source in ctx.config.sources() if source.kind == "file" and source.origin
+    ]
+    if loaded:
+        print("loaded:")
+        for origin in loaded:
+            print(f"  - {origin}")
+    return 0
+
+
+def _config_target(ctx) -> pathlib.Path:
+    """init/set의 대상 파일. --config 플래그가 있으면 그 경로, 없으면 사용자 경로."""
+    override = ctx.flags.get("config")
+    if override:
+        return pathlib.Path(str(override))
+    return user_config_path()
+
+
+def run_config_init(ctx) -> int:
+    target = _config_target(ctx)
+    if target.exists() and not ctx.flags.get("force"):
+        print(
+            ctx.terminal.message(
+                "error", "config", f"이미 존재한다: {target} (--force 로 덮어쓸 수 있다)"
+            )
+        )
+        return 1
+    write_toml(target, _CONFIG_DEFAULTS, header=_CONFIG_HEADER)
+    print(f"설정 파일을 생성했다: {target}")
+    return 0
+
+
+def run_config_set(ctx) -> int:
+    if len(ctx.args) != 2:
+        print(
+            ctx.terminal.message(
+                "error",
+                "config",
+                "사용법: ros-tviewer config set <key> <value> "
+                "(예: config set camera.fps 60 | config set camera.topic /cam)",
+            )
+        )
+        return 1
+    key, raw = ctx.args
+    if not all(part for part in key.split(".")):
+        print(ctx.terminal.message("error", "config", f"잘못된 키: {key!r}"))
+        return 1
+    target = _config_target(ctx)
+    if target.is_file():
+        data = read_toml(target)
+    else:
+        data = {section: dict(values) for section, values in _CONFIG_DEFAULTS.items()}
+    value = parse_toml_value(raw)
+    set_nested(data, key, value)
+    write_toml(target, data, header=_CONFIG_HEADER)
+    print(f"저장했다: {key} = {value!r} -> {target}")
     return 0
 
 

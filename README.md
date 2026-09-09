@@ -56,13 +56,21 @@ uv run ros-tviewer play /camera/image_raw
 # 옵션 예시
 uv run ros-tviewer play /camera/image_raw/compressed --fps 30 --rotate 90 --stretch
 uv run ros-tviewer play /camera/image_raw --frames 100   # 100 프레임 렌더 후 종료 (테스트/데모)
-uv run ros-tviewer config                                # 현재 설정 출력
+uv run ros-tviewer config                                # 현재 설정 출력 (= config show)
+uv run ros-tviewer config init                           # 플랫폼 사용자 설정 파일 생성
+uv run ros-tviewer config set camera.fps 60              # 사용자 설정 파일에 저장
+uv run ros-tviewer config path                           # 설정 파일 후보 경로 표시
 uv run ros-tviewer version                               # 앱·의존성·런타임 리포트
 ```
 
 - `q`/`Ctrl+C`로 종료 (터미널 상태 자동 복구).
 - `--compressed` 미지정 시 토픽 타입을 자동 감지한다.
-- 설정 우선순위: **CLI 플래그 > `.env` > `config.toml` > 기본값**.
+- 설정 우선순위: **CLI 플래그 > `.env` > cwd `config.toml` > 사용자 `config.toml` > 기본값**.
+- 설정 파일 후보: cwd `./config.toml` + 플랫폼별 사용자 경로의 `config.toml`
+  (Linux: `~/.config/ros-tviewer/`, macOS: `~/Library/Application Support/ros-tviewer/`,
+  Windows: `%APPDATA%\\ros-tviewer/`). uvx로 임의 디렉터리에서 실행해도
+  사용자 경로 설정이 유지된다. `--config/-c` 플래그가 지정되면 최우선으로 로드되며,
+  `config init`/`config set`의 저장 대상도 된다.
 
 ## E2E 테스트
 
@@ -77,6 +85,7 @@ uv run pytest tests/test_ros2_e2e.py -v   # 실제 rclpy 구독 + 렌더 E2E
 | 모듈 | 책임 |
 | --- | --- |
 | `main.py` | wpycli 커맨드 (`play`/`topics`/`config`), 플래그·설정 파싱 |
+| `config_io.py` | TOML 읽기/쓰기 헬퍼 (config init/set가 사용, rclpy 무의존) |
 | `ros_env.py` | rclpy 부트스트랩 (시스템 ROS 탐지 → sys.path 주입 → re-exec) |
 | `node.py` | 구독(QoS sensor_data), 최신 메시지 유지(drop), FPS 스로틀, 렌더 직전 변환 루프 |
 | `convert.py` | Image/CompressedImage → RGB24 numpy (numpy/opencv만 사용, cv_bridge 없이) |
