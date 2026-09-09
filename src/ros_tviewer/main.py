@@ -6,10 +6,10 @@ import pathlib
 from wconfig import user_config_dir
 from wpycli import Command, ConfigSettings, LoggingSettings
 
+from . import get_version
 from .config_io import parse_toml_value, read_toml, set_nested, write_toml
 
 APP_NAME = "ros-tviewer"
-VERSION = "0.1.0"
 DEFAULT_TOPIC = "/camera/image_raw"
 
 # 실제로 읽히는 키만 둔다. app.name/app.default_topic 등은 어디서도 읽지 않아 제거했다.
@@ -68,7 +68,7 @@ def build_root() -> Command:
         short="ROS 2 카메라 토픽을 터미널에서 재생하는 뷰어",
         long="sensor_msgs/Image, CompressedImage 토픽을 tcamviewer Half-Block "
         "TrueColor 렌더러로 터미널에 실시간 재생한다.",
-        version=VERSION,
+        version=get_version(),
     )
     root.add_persistent_string_flag("config", help="추가 config.toml 경로", shorthand="c")
     root.add_persistent_string_flag("dotenv", help="추가 .env 경로")
@@ -328,14 +328,8 @@ def run_version(ctx) -> int:
     """앱·의존성·런타임 환경 리포트. 문제 보고 시 그대로 붙여넣어 사용한다."""
     import os
     import platform
-    from importlib.metadata import PackageNotFoundError
-    from importlib.metadata import version as pkg_version
 
-    app_version = VERSION
-    try:
-        app_version = pkg_version(APP_NAME)
-    except PackageNotFoundError:
-        app_version = VERSION  # 개발 트리 등 메타데이터 없음 → 상수 fallback
+    app_version = get_version()
 
     def _row(label: str, value: str) -> None:
         print(f"{label:<12} {value}")

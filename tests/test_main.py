@@ -159,10 +159,26 @@ def test_version_output_contains_runtime_report(capsys):
     out = capsys.readouterr().out
     assert rc == 0
     assert "ros-tviewer" in out
-    assert "0.1.0" in out  # 앱 버전 (importlib.metadata 기반)
+    assert pyproject_version() in out  # 앱 버전 — pyproject.toml 단일 소스
     assert "python" in out
     assert "tcamviewer" in out  # 핵심 의존성 버전 리포트
     assert "terminal" in out
+
+
+def pyproject_version() -> str:
+    import tomllib
+
+    data = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))
+    return str(data["project"]["version"])
+
+
+def test_version_has_no_hardcoded_constant():
+    """버전은 pyproject.toml 단일 소스다 — 코드 상수로 복제하지 않는다."""
+    import ros_tviewer
+
+    assert ros_tviewer.__version__ == pyproject_version()
+    src = (pathlib.Path("src/ros_tviewer/main.py")).read_text(encoding="utf-8")
+    assert "VERSION = " not in src
 
 
 def test_version_missing_dependency_shows_placeholder(monkeypatch, capsys):

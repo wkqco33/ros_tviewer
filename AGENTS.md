@@ -12,6 +12,7 @@ ROS 2 카메라 토픽을 터미널에서 재생하는 CLI 뷰어. 이 문서는
 | 목적 | ROS 2 `sensor_msgs/msg/Image`, `CompressedImage` 토픽을 터미널(ANSI TrueColor Half-Block)로 실시간 재생 |
 | 렌더링 | [tcamviewer](https://pypi.org/project/tcamviewer/) `>=0.2.3` (C-ABI 코어 + ctypes 바인딩, PyPI 배포됨) |
 | CLI | `wpycli` (cobra 스타일 Command), 설정 `wpyconf`, 로깅 `wpylog` |
+| 버전 | **단일 소스 = `pyproject.toml`**. 런타임은 `ros_tviewer.__init__.get_version()` (메타데이터 → pyproject 파싱 fallback). 코드에 VERSION 상수로 두지 않는다. CHANGELOG는 릴리스마다 수동 갱신 |
 | 실행 | `uv run ros-tviewer play /camera/image_raw` 또는 ROS env source 후 `uvx ros-tviewer ...` |
 | Python | 3.12 (ROS 2 Jazzy ABI 매칭 — `requires-python = ">=3.12"`) |
 | 테스트 | `pytest` (단위), E2E는 ROS 환경에서 `bash tests/e2e.sh` |
